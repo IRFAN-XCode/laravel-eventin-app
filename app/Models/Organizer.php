@@ -14,11 +14,9 @@ class Organizer extends Model
 
     // Kolom-kolom yang ada di migration kamu
     protected $fillable = [
-        'nama',
-        'email',
+        'user_id',
         'nama_eo',
         'file_proposal',
         'status',
-        'role,'
     ];
 }
