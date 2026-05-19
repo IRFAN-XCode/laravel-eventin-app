@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\User;
+use App\Models\Organizer;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+
 
 class ProfileController extends Controller
 {
@@ -102,5 +106,65 @@ class ProfileController extends Controller
             'role' => $user->role
         ]
     ], 200);
+}
+
+public function deleteAccount(Request $request)
+{
+    $authUser = $request->attributes->get('auth_user');
+
+    if (!$authUser) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Sesi tidak valid atau pengguna tidak ditemukan.'
+        ], 401);
+    }
+
+    $user = User::find($authUser->id);
+
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Pengguna tidak ditemukan di database.'
+        ], 404);
+    }
+
+    DB::beginTransaction();
+
+
+try {
+    if ($user->role === 'organizer') {
+        
+        // Ambil data organizer berdasarkan user_id sebelum dihapus
+        $organizer = Organizer::where('user_id', $user->id)->first();
+
+        if ($organizer) {
+            if ($organizer->file_proposal && Storage::disk('public')->exists($organizer->file_proposal)) {
+                
+                Storage::disk('public')->delete($organizer->file_proposal);
+            }
+
+            // Hapus baris data dari tabel 'organizers'
+            $organizer->delete();
+        }
+    }
+
+    $user->delete();
+
+    DB::commit();
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Akun Anda beserta berkas proposal berhasil dihapus secara permanen.'
+    ], 200);
+
+} catch (\Exception $e) {
+    DB::rollback();
+
+    return response()->json([
+        'success' => false,
+        'message' => 'Gagal menghapus akun. Terjadi kesalahan pada server.',
+        'error' => $e->getMessage()
+    ], 500);
+}
 }
 }

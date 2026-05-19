@@ -13,11 +13,6 @@ class Event extends Model
 
     // perbarui oleh romi (1)
     protected $fillable = [
-        // 'nama_event',
-        // 'tgl_event',
-        // 'harga_tiket',
-        // 'organizer_id',
-        // 'status',
         'nama_event',
         'tgl_event',
         'organizer_id',

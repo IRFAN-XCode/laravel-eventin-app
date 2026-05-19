@@ -195,64 +195,88 @@ class AuthController extends Controller
     }
 
     public function changePassword(Request $request)
-{
-    // 1. Ambil data user dari JWT Middleware
-    $authUser = $request->attributes->get('auth_user');
-
-    if (!$authUser) {
+    {
+        // 1. Ambil data user dari JWT Middleware
+        $authUser = $request->attributes->get('auth_user');
+    
+        if (!$authUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi tidak valid atau pengguna tidak ditemukan.'
+            ], 401);
+        }
+    
+        // 2. Cari data lengkap user
+        $user = User::find($authUser->id);
+    
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pengguna tidak ditemukan di database.'
+            ], 404);
+        }
+    
+        // 3. Validasi Input
+        $validator = Validator::make($request->all(), [
+            'old_password' => 'required|string',
+            'new_password' => 'required|string|min:6|confirmed',
+        ], [
+            'old_password.required' => 'Password lama wajib diisi.',
+            'new_password.required' => 'Password baru wajib diisi.',
+            'new_password.min' => 'Password baru minimal bertipe 6 karakter.',
+            'new_password.confirmed' => 'Konfirmasi password baru tidak cocok.',
+            'new_password.regex' => 'Password baru hanya boleh berisi huruf dan angka.',
+        ]);
+    
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'Validasi gagal',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+    
+        // 4. Cek password lama dengan di database
+        if (!Hash::check($request->old_password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Password lama yang Anda masukkan salah.'
+            ], \Symfony\Component\HttpFoundation\Response::HTTP_BAD_REQUEST);
+        }
+    
+        // 5. Enkripsi password baru
+        $user->update([
+            'password' => Hash::make($request->new_password)
+        ]);
+    
+        // 6. response sukses
         return response()->json([
-            'success' => false,
-            'message' => 'Sesi tidak valid atau pengguna tidak ditemukan.'
-        ], 401);
+            'success' => true,
+            'message' => 'Password berhasil diperbarui.'
+        ], 200);
+    }
+    
+    public function logout(Request $request)
+    {
+        // 1. Ambil data user dari JWT Middleware (untuk memastikan user memang sudah login)
+        $authUser = $request->attributes->get('auth_user');
+    
+        if (!$authUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi sudah berakhir atau token tidak valid.'
+            ], 401);
+        }
+    
+        // 2. Lakukan logout pada guard bawaan Laravel untuk membersihkan state session/auth lokal
+        Auth::guard('web')->logout(); 
+    
+        // 3. Kembalikan response sukses ke Ionic
+        return response()->json([
+            'success' => true,
+            'message' => 'Berhasil keluar dari akun. Sesi telah dihapus.'
+        ], 200);
     }
 
-    // 2. Cari data lengkap user
-    $user = User::find($authUser->id);
-
-    if (!$user) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Pengguna tidak ditemukan di database.'
-        ], 404);
-    }
-
-    // 3. Validasi Input
-    $validator = Validator::make($request->all(), [
-        'old_password' => 'required|string',
-        'new_password' => 'required|string|min:6|confirmed',
-    ], [
-        'old_password.required' => 'Password lama wajib diisi.',
-        'new_password.required' => 'Password baru wajib diisi.',
-        'new_password.min' => 'Password baru minimal bertipe 6 karakter.',
-        'new_password.confirmed' => 'Konfirmasi password baru tidak cocok.',
-        'new_password.regex' => 'Password baru hanya boleh berisi huruf dan angka.',
-    ]);
-
-    if ($validator->fails()) {
-        return response()->json([
-            'success' => false, 
-            'message' => 'Validasi gagal',
-            'errors' => $validator->errors()
-        ], 422);
-    }
-
-    // 4. Cek password lama dengan di database
-    if (!Hash::check($request->old_password, $user->password)) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Password lama yang Anda masukkan salah.'
-        ], \Symfony\Component\HttpFoundation\Response::HTTP_BAD_REQUEST);
-    }
-
-    // 5. Enkripsi password baru
-    $user->update([
-        'password' => Hash::make($request->new_password)
-    ]);
-
-    // 6. response sukses
-    return response()->json([
-        'success' => true,
-        'message' => 'Password berhasil diperbarui.'
-    ], 200);
-}
+    
 }
