@@ -59,6 +59,7 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+        // 1. Validasi format input
         $validator = Validator::make($request->all(), [
             'email' => 'required|string|email',
             'password' => 'required|string'
@@ -67,7 +68,7 @@ class AuthController extends Controller
             'email.email' => 'Format email tidak valid.',
             'password.required' => 'Password wajib diisi.'
         ]);
-
+    
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
@@ -75,13 +76,42 @@ class AuthController extends Controller
                 'errors' => $validator->errors()
             ], 422);
         }
-
+    
         $credentials = $request->only('email', 'password');
-
-        
+    
+        // 2. Cek kecocokan Email & Password di tabel users
         if (Auth::attempt($credentials)) {
             $user = Auth::user();
-
+    
+            if ($user->role === 'organizer') {
+                // Cari data profil mereka di tabel 'organizers' berdasarkan user_id
+                $organizer = Organizer::where('user_id', $user->id)->first();
+    
+                // Jika baris data profil EO tidak sengaja hilang di database
+                if (!$organizer) {
+                    Auth::logout(); // Batalkan sesi login lokal
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Profil data Organizer Anda tidak ditemukan.'
+                    ], 404);
+                }
+    
+                if ($organizer->status === 'pending') {
+                    Auth::logout();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Akun Anda masih dalam status peninjauan.'
+                    ], 403);
+                }
+    
+                if ($organizer->status === 'rejected') {
+                    Auth::logout();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Maaf, pendaftaran Organizer Anda ditolak karena berkas tidak memenuhi syarat.'
+                    ], 403);
+                }
+            }
             $payload = [
                 'id' => $user->id,
                 'nama' => $user->nama,
@@ -90,9 +120,95 @@ class AuthController extends Controller
                 'iat' => now()->timestamp,
                 'exp' => now()->addHours(2)->timestamp 
             ];
-
+    
             $token = JWT::encode($payload, env('JWT_SECRET_KEY'), 'HS256');
+    
+            return response()->json([
+                'success' => true,
+                'message' => 'Login berhasil!',
+                'user' => [
+                    'id' => $user->id,
+                    'nama' => $user->nama,
+                    'jenis_kelamin' => $user->jenis_kelamin,
+                    'nomor_handphone' => $user->nomor_handphone,
+                    'email' => $user->email,
+                    'role' => $user->role
+                ],
+                'token' => 'Bearer ' . $token
+            ], 200);
+        }
+    
+        return response()->json([
+            'success' => false,
+            'message' => 'Email atau Password salah!'
+        ], 401);
+    }
 
+    public function loginOrganizer(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string|email',
+            'password' => 'required|string'
+        ], [
+            'email.required' => 'Email wajib diisi.',
+            'email.email' => 'Format email tidak valid.',
+            'password.required' => 'Password wajib diisi.'
+        ]);
+    
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+    
+        $credentials = $request->only('email', 'password');
+    
+        // 2. Cek kecocokan Email & Password di tabel users
+        if (Auth::attempt($credentials)) {
+            $user = Auth::user();
+    
+            if ($user->role === 'organizer') {
+                // Cari data profil mereka di tabel 'organizers' berdasarkan user_id
+                $organizer = Organizer::where('user_id', $user->id)->first();
+    
+                // Jika baris data profil EO tidak sengaja hilang di database
+                if (!$organizer) {
+                    Auth::logout();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Profil data Organizer Anda tidak ditemukan.'
+                    ], 404);
+                }
+    
+                if ($organizer->status === 'pending') {
+                    Auth::logout();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Akun Anda masih dalam status peninjauan.'
+                    ], 403);
+                }
+    
+                if ($organizer->status === 'rejected') {
+                    Auth::logout();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Maaf, pendaftaran Organizer Anda ditolak karena berkas tidak memenuhi syarat.'
+                    ], 403);
+                }
+            }
+            $payload = [
+                'id' => $user->id,
+                'nama' => $user->nama,
+                'email' => $user->email,
+                'role' => $user->role,
+                'iat' => now()->timestamp,
+                'exp' => now()->addHours(2)->timestamp 
+            ];
+    
+            $token = JWT::encode($payload, env('JWT_SECRET_KEY'), 'HS256');
+    
             return response()->json([
                 'success' => true,
                 'message' => 'Login berhasil!',
@@ -100,12 +216,14 @@ class AuthController extends Controller
                     'id' => $user->id,
                     'nama' => $user->nama,
                     'email' => $user->email,
-                    'role' => $user->role
+                    'role' => $user->role,
+                    'iat' => now()->timestamp,
+                    'exp' => now()->addMinutes(30)->timestamp
                 ],
                 'token' => 'Bearer ' . $token
             ], 200);
         }
-
+    
         return response()->json([
             'success' => false,
             'message' => 'Email atau Password salah!'
@@ -166,7 +284,7 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'nama_eo' => $request->nama_eo,
                 'file_proposal' => $filePath,
-                'status' => 'pending',
+                'status' => 'accept',
             ]);
 
             DB::commit();
@@ -258,19 +376,16 @@ class AuthController extends Controller
     
     public function logout(Request $request)
     {
-        // 1. Ambil data user dari JWT Middleware (untuk memastikan user memang sudah login)
+        // Ambil data user dari JWT Middleware (untuk memastikan user memang sudah login)
         $authUser = $request->attributes->get('auth_user');
-    
         if (!$authUser) {
             return response()->json([
                 'success' => false,
                 'message' => 'Sesi sudah berakhir atau token tidak valid.'
             ], 401);
         }
-    
-        // 2. Lakukan logout pada guard bawaan Laravel untuk membersihkan state session/auth lokal
+        // 2. guard bawaan Laravel untuk membersihkan state session/auth lokal
         Auth::guard('web')->logout(); 
-    
         // 3. Kembalikan response sukses ke Ionic
         return response()->json([
             'success' => true,
@@ -278,5 +393,43 @@ class AuthController extends Controller
         ], 200);
     }
 
-    
+        public function refreshToken(Request $request)
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (!$authUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi tidak sah, gagal memperbarui token.'
+            ], 401);
+        }
+
+        // Cari user di database 
+        $user = User::find($authUser->id);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pengguna tidak ditemukan.'
+            ], 404);
+        }
+
+        // Buat Payload Baru
+        $payload = [
+            'id' => $user->id,
+            'nama' => $user->nama,
+            'email' => $user->email,
+            'role' => $user->role,
+            'iat' => now()->timestamp,
+            'exp' => now()->addMinutes(30)->timestamp // Reset otomatis masa berlaku baru
+        ];
+
+        $newToken = JWT::encode($payload, env('JWT_SECRET_KEY'), 'HS256');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Token berhasil diperbarui otomatis.',
+            'token' => 'Bearer ' . $newToken
+        ], 200);
+    }
 }

@@ -123,4 +123,6 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'jwt_secret' => env('JWT_SECRET', 'EventInakbsfs8738ffv6sVts42n1933Ulfa25xhsj')
+
 ];

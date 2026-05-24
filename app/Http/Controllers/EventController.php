@@ -5,126 +5,170 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 // use Illuminate\Support\Facades\DB;
 use App\Models\Event;
-use App\Models\Organizer;
-use Illuminate\Support\Facades\Validator;
+// use App\Models\Organizer;
+// use Illuminate\Support\Facades\Validator;
 // use Illuminate\Support\Facades\Storage;
 
 // Laravel Romi (2)
 class EventController extends Controller
 {
     
-    public function index()
+    public function index(Request $request)
     {
-        // Menggunakan Eloquent dengan relasi organizer dan filter status 'open'
-        $events = Event::with('organizer:id,nama_eo') 
-            ->select('id', 'nama_event', 'tgl_event', 'harga_reg', 'organizer_id', 'thumbnail')
-            ->where('status', 'open') 
-            ->orderBy('tgl_event', 'asc') 
-            ->get();
+        try {
+            $kategori = $request->query('kategori');
+            $search = $request->query('search');
 
-        $events->map(function ($event) {
-            if ($event->thumbnail) {
-                $event->poster_url = asset('storage/' . $event->thumbnail);
-            } else {
-                $event->poster_url = 'https://via.placeholder.com/150';
+            $eventQuery = \App\Models\Event::with('organizer:id,nama_eo') 
+                ->select('id', 'nama_event', 'tgl_event', 'harga_reg', 'organizer_id', 'thumbnail', 'kategori', 'status')
+                ->where('status', 'open'); 
+
+            if ($request->filled('kategori')) {
+                $eventQuery->where('kategori', $kategori);
             }
-            return $event;
-        });
+            
+            if ($request->filled('search')) {
+                $searchKey = strtolower($request->query('search'));
+                $eventQuery->whereRaw('LOWER(nama_event) LIKE ?', ["%{$searchKey}%"]);
+            }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Daftar event aktif berhasil diambil.',
-            'data'    => $events
-        ], 200);
+            $events = $eventQuery->orderBy('tgl_event', 'asc')->get();
+
+            $events->map(function ($event) {
+                if ($event->thumbnail) {
+                    $event->poster_url = asset('storage/' . $event->thumbnail);
+                } else {
+                    $event->poster_url = 'https://via.placeholder.com/150';
+                }
+                return $event;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Daftar event aktif berhasil diambil.',
+                'data'    => $events
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan internal server.',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
     }
 
-    /**
-     * Menyimpan data event baru (Untuk Request POST)
-     */
-    public function store(Request $request)
-    {
-        // 1. Ambil data user dari JWT Middleware kustom
-        $authUser = $request->attributes->get('auth_user');
+    // public function store(Request $request)
+    // {
+    //     $authUser = $request->attributes->get('auth_user');
 
-        if (!$authUser || $authUser->role !== 'organizer') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Akses ditolak! Hanya Organizer yang dapat membuat event.'
-            ], 403);
-        }
+    //     if (!$authUser || $authUser->role !== 'organizer') {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Akses ditolak! Hanya Organizer yang dapat membuat event.'
+    //         ], 403);
+    //     }
 
-        // 2. Cari organizer_id dari tabel 'organizers' berdasarkan user_id token
-        $organizer = Organizer::where('user_id', $authUser->id)->first();
+    //     $organizer = Organizer::where('user_id', $authUser->id)->first();
 
-        if (!$organizer) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Profil Organizer Anda tidak ditemukan.'
-            ], 404);
-        }
+    //     if (!$organizer) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Profil Organizer Anda tidak ditemukan.'
+    //         ], 404);
+    //     }
 
-        // 3. Validasi input
-        $validator = Validator::make($request->all(), [
-            'nama_event'    => 'required|string|max:255',
-            'waktu'         => 'required|date_format:H:i',
-            'tgl_event'     => 'required|date_format:Y-m-d|after_or_equal:today',
-            'harga_vip'     => 'required|numeric|min:0',
-            'harga_reg'     => 'required|numeric|min:0',
-            'lokasi'        => 'required|string',
-            'seats'         => 'required|integer|min:1',
-            'kapasitas_vip' => 'required|integer|min:0',
-            'kapasitas_reg' => 'required|integer|min:0',
-            'kategori'      => 'required|string|in:music,theater,workshop',
-            'thumbnail'  => 'required|image|mimes:jpeg,png,jpg|max:2048',
-        ], [
-            'nama_event.required' => 'Nama event wajib diisi.',
-            'tgl_event.after_or_equal' => 'Tanggal event tidak boleh di masa lampau.',
-            'thumbnail.required' => 'Poster atau banner event wajib diunggah.',
-            'thumbnail.image' => 'Berkas berkategori poster harus berupa gambar.',
-        ]);
+    //     // 3. Validasi input
+    //     $validator = Validator::make($request->all(), [
+    //             'nama_event'    => 'required|string|max:255',
+    //             'waktu'         => 'required|date_format:H:i',
+    //             'tgl_event'     => 'required|date_format:Y-m-d|after_or_equal:today',
+    //             'lokasi'        => 'required|string',
+    //             'kategori'      => 'required|string|in:music,theater,workshop',
+    //             'thumbnail'     => 'required|image|mimes:jpeg,png,jpg|max:2048',
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+    //             'seats'         => 'required|boolean',
+
+    //             'harga_vip'     => 'required_if:seats,true,1|nullable|numeric|min:0',
+    //             'kapasitas_vip' => 'required_if:seats,true,1|nullable|integer|min:0',
+
+    //             'harga_reg'     => 'required|numeric|min:0',
+    //             'kapasitas_reg' => 'required|integer|min:0',
+    //         ], [
+    //             'nama_event.required'      => 'Nama event wajib diisi.',
+    //             'tgl_event.after_or_equal' => 'Tanggal event tidak boleh di masa lampau.',
+    //             'thumbnail.required'       => 'Poster atau banner event wajib diunggah.',
+    //             'thumbnail.image'          => 'Berkas berkategori poster harus berupa gambar.',
+    //             'seats.required'           => 'Status opsi penggunaan tempat duduk wajib ditentukan.',
+
+    //             'harga_vip.required_if'     => 'Harga tiket VIP wajib diisi jika event menggunakan nomor kursi/kelas VIP.',
+    //             'kapasitas_vip.required_if' => 'Kapasitas tiket VIP wajib diisi jika event menggunakan nomor kursi/kelas VIP.',
+    //             'harga_reg.required'        => 'Harga tiket reguler wajib diisi.',
+    //             'kapasitas_reg.required'    => 'Kapasitas tiket reguler wajib diisi.',
+    //         ]);
+            // $validator = Validator::make($request->all(), [
+        //     'nama_event'    => 'required|string|max:255',
+        //     'waktu'         => 'required|date_format:H:i',
+        //     'tgl_event'     => 'required|date_format:Y-m-d|after_or_equal:today',
+        //     'harga_vip'     => 'required|numeric|min:0',
+        //     'harga_reg'     => 'required|numeric|min:0',
+        //     'lokasi'        => 'required|string',
+        //     'seats'         => 'required|integer|min:1',
+        //     'kapasitas_vip' => 'required|integer|min:0',
+        //     'kapasitas_reg' => 'required|integer|min:0',
+        //     'kategori'      => 'required|string|in:music,theater,workshop',
+        //     'thumbnail'  => 'required|image|mimes:jpeg,png,jpg|max:2048',
+        // ], [
+        //     'nama_event.required' => 'Nama event wajib diisi.',
+        //     'tgl_event.after_or_equal' => 'Tanggal event tidak boleh di masa lampau.',
+        //     'thumbnail.required' => 'Poster atau banner event wajib diunggah.',
+        //     'thumbnail.image' => 'Berkas berkategori poster harus berupa gambar.',
+        // ]);
+
+
+        // if ($validator->fails()) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => 'Validasi gagal',
+        //         'errors' => $validator->errors()
+        //     ], 422);
+        // }
 
         // 4. Proses upload file poster event ke folder storage/app/public/events
-        $posterPath = null;
-        if ($request->hasFile('thumbnail')) {
-            $file = $request->file('thumbnail');
-            $posterPath = $file->store('events', 'public');
-        }
+        // $posterPath = null;
+        // if ($request->hasFile('thumbnail')) {
+        //     $file = $request->file('thumbnail');
+        //     $posterPath = $file->store('events', 'public');
+        // }
 
         // 5. Menyusun data lengkap untuk disimpan ke database
-        $eventData = [
-            'organizer_id'  => $organizer->id,
-            'nama_event'    => $request->nama_event,
-            'waktu'         => $request->waktu,
-            'tgl_event'     => $request->tgl_event,
-            'harga_vip'     => $request->harga_vip,
-            'harga_reg'     => $request->harga_reg,
-            'lokasi'        => $request->lokasi,
-            'seats'         => $request->seats,
-            'thumbnail'     => $posterPath,
-            'kapasitas_vip' => $request->kapasitas_vip,
-            'kapasitas_reg' => $request->kapasitas_reg,
-            'kategori'      => $request->kategori,
-            'status'        => 'open',
-        ];
+        // $eventData = [
+        //     'organizer_id'  => $organizer->id,
+        //     'nama_event'    => $request->nama_event,
+        //     'waktu'         => $request->waktu,
+        //     'tgl_event'     => $request->tgl_event,
+        //     'harga_vip'     => $request->seats ? $request->harga_vip : 0,
+        //     'harga_reg'     => $request->harga_reg,
+        //     'lokasi'        => $request->lokasi,
+        //     'seats'         => $request->seats,
+        //     'thumbnail'     => $posterPath,
+        //     'kapasitas_vip' => $request->seats ? $request->kapasitas_vip : 0,
+        //     'kapasitas_reg' => $request->kapasitas_reg,
+        //     'kategori'      => $request->kategori,
+        //     'status'        => 'open',
+        // ];
+
 
         // Simpan ke database melalui Model Event
-        $event = Event::create($eventData);
+        // $event = Event::create($eventData);
 
         // 6. Response Sukses (Memperbaiki kode status 21 -> 201)
-        return response()->json([
-            'success' => true,
-            'message' => 'Event berhasil dipublikasikan!',
-            'data'    => $event
-        ], 201);
-    }
+    //     return response()->json([
+    //         'success' => true,
+    //         'message' => 'Event berhasil dipublikasikan!',
+    //         'data'    => $event
+    //     ], 201);
+    // }
 
     public function show($id) 
     {

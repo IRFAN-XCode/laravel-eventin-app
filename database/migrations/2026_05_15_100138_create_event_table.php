@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('organizer_id')->references('id')->on('organizer')->onDelete('cascade');
             $table->string('nama_event');
+            $table->text('deskripsi');
             $table->time('waktu');
             $table->date('tgl_event');
             $table->integer('harga_vip')->nullable();
@@ -24,7 +25,7 @@ return new class extends Migration
             $table->string('thumbnail');
             $table->integer('kapasitas_vip')->nullable();
             $table->integer('kapasitas_reg')->nullable();
-            $table->enum('kategori', ['Musik', 'Seminar', 'Workshop']);
+            $table->enum('kategori', ['musik', 'pameran', 'seminar', 'workshop']);
             $table->enum('status', ['open', 'close'])->default('open');
             $table->timestamps();
         });
