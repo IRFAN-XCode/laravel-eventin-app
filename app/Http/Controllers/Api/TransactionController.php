@@ -4,43 +4,41 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\User;
 use App\Models\Event;
 use App\Models\Transaction;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Midtrans\Config;
-use Midtrans\Snap;
+// use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
+
 
 class TransactionController extends Controller
 {
-    public function __construct()
-    {
-        Config::$serverKey = env('MIDTRANS_SERVER_KEY');
-        Config::$isProduction = false;
-        Config::$isSanitized = true;
-        Config::$is3ds = true;
-    }
-
-     //FUNGSI CHECKOUT
     public function checkout(Request $request)
     {
-        $authUser = $request->attributes->get('auth_user');
-        if (!$authUser) {
+        $jwtUser = $request->attributes->get('auth_user');
+        if (!$jwtUser) {
             return response()->json(['success' => false, 'message' => 'Sesi tidak valid, silakan login ulang.'], 401);
         }
 
+        $authUser = User::find($jwtUser->id);
+        if (empty($authUser->nama) || empty($authUser->email) || empty($authUser->jenis_kelamin) || empty($authUser->nomor_handphone)) {
+            return response()->json(['success' => false, 'message' => 'Profil Anda belum lengkap! Silakan lengkapi di menu profil.'], 400);
+        }
+
         $validator = Validator::make($request->all(), [
-            'event_id'    => 'required|integer',
-            'jenis_tiket' => 'required|in:vip,reguler',
-            'nomor_kursi' => 'nullable|string|max:50',
+            'event_id'         => 'required|integer',
+            'jenis_tiket'      => 'required|in:vip,reguler',
+            'nomor_kursi'      => 'nullable|string|max:50',
+            'bank_pengirim'    => 'required|string|max:100',
+            'atas_nama'        => 'required|string|max:100',
+            'bukti_pembayaran' => 'required|image|mimes:jpeg,png,jpg|max:3072',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal',
-                'errors'  => $validator->errors()
-            ], 422);
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
         $event = Event::find($request->event_id);
@@ -48,109 +46,73 @@ class TransactionController extends Controller
             return response()->json(['success' => false, 'message' => 'Event tidak ditemukan.'], 404);
         }
 
-        if ($event->seats && json_decode($event->seats) === true && empty($request->nomor_kursi)) {
-            return response()->json(['success' => false, 'message' => 'Nomor kursi wajib dipilih untuk event ini.'], 400);
-        }
-
-        // Pengecekan sisa kuota disesuaikan dengan jenis tiket yang dipilih
-        $sisaKuota = ($request->jenis_tiket === 'vip') ? $event->kapasitas_vip : $event->kapasitas_reg;
-        if ($sisaKuota < 1) {
-            return response()->json(['success' => false, 'message' => 'Maaf, kuota tiket untuk kelas ini sudah habis.'], 400);
-        }
-
-        $jumlahTiket = 1;
+        // Hitung harga
         $hargaSatuan = ($request->jenis_tiket === 'vip') ? $event->harga_vip : $event->harga_reg;
-        $totalHarga  = $hargaSatuan * $jumlahTiket;
-
         $kodeTransaksi = 'EVT-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
-
-        $midtransPayload = [
-            'transaction_details' => [
-                'order_id'     => $kodeTransaksi,
-                'gross_amount' => (int) $totalHarga,
-            ],
-            'customer_details' => [
-                'first_name' => $authUser->nama,
-                'email'      => $authUser->email,
-            ],
-            'item_details' => [
-                [
-                    'id'       => $event->id,
-                    'price'    => (int) $hargaSatuan,
-                    'quantity' => 1,
-                    'name'     => 'Tiket ' . ucfirst($request->jenis_tiket) . ' ' . ($request->nomor_kursi ? '('.$request->nomor_kursi.')' : ''),
-                ]
-            ],
-        ];
 
         DB::beginTransaction();
         try {
-            $snapToken = Snap::getSnapToken($midtransPayload);
+            // Proses Upload File Gambar ke folder public/storage/bukti_bayar
+            if ($request->hasFile('bukti_pembayaran')) {
+                $file = $request->file('bukti_pembayaran');
+                $namaFile = $kodeTransaksi . '.' . $file->getClientOriginalExtension();
+                $path = $file->storeAs('bukti_bayar', $namaFile, 'public');
+            }
 
             $transaction = Transaction::create([
                 'kode_transaksi'    => $kodeTransaksi,
                 'user_id'           => $authUser->id,
                 'event_id'          => $event->id,
                 'jenis_tiket'       => $request->jenis_tiket,
-                'nomor_kursi'       => $request->nomor_kursi,
+                'nomor_kursi'       => $request->filled('nomor_kursi') ? $request->nomor_kursi : null,
                 'jumlah_tiket'      => 1,
-                'total_harga'       => $totalHarga,
-                'status_pembayaran' => 'pending',
+                'total_harga'       => $hargaSatuan,
+                'bank_pengirim'     => $request->bank_pengirim,
+                'atas_nama'         => $request->atas_nama,
+                'bukti_pembayaran'  => $path ?? null,
+                'status_pembayaran' => 'checking_admin',
                 'status_kehadiran'  => 'belum_hadir',
-                'snap_token'        => $snapToken,
             ]);
 
             DB::commit();
 
+            // TRIGGER TELEGRAM NOTIFIKASI KE ADMIN (Sesuai konsep nomor 3)
+            $this->kirimNotifTelegram($transaction, $event, $authUser);
+
             return response()->json([
                 'success' => true,
-                'message' => 'Sesi pembayaran berhasil dibuat.',
-                'data'    => [
-                    'kode_transaksi' => $transaction->kode_transaksi,
-                    'snap_token'     => $snapToken
-                ]
+                'message' => 'Bukti pembayaran berhasil diunggah. Menunggu konfirmasi admin.',
+                'data'    => ['kode_transaksi' => $kodeTransaksi]
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Gagal terhubung ke gateway pembayaran.',
-                'error'   => $e->getMessage()
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'Gagal menyimpan transaksi.', 'error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * FUNGSI NOTIFICATION HANDLER - PERBAIKAN LOGIKA TOTAL
-     */
-    public function notificationHandler(Request $request)
+    public function konfirmasiStatusAdmin(Request $request, $id)
     {
+        $validator = Validator::make($request->all(), [
+            'status' => 'required|in:success,failed'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Status tidak valid.'], 422);
+        }
+
+        $transaction = Transaction::find($id);
+        if (!$transaction) {
+            return response()->json(['success' => false, 'message' => 'Transaksi tidak ditemukan.'], 404);
+        }
+
+        if ($transaction->status_pembayaran === 'success') {
+            return response()->json(['success' => false, 'message' => 'Transaksi ini sudah berstatus sukses sebelumnya.'], 400);
+        }
+
+        DB::beginTransaction();
         try {
-            $notif = new \Midtrans\Notification();
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Invalid Notification Payload'], 400);
-        }
-
-        $transactionStatus = $notif->transaction_status;
-        $orderId           = $notif->order_id; // Perbaikan capitalization: $orderId (bukan $orderid)
-        $statusPembayaran  = 'pending';
-
-        // 1. Tentukan status pembayaran dari Midtrans dahulu
-        if ($transactionStatus == 'capture' || $transactionStatus == 'settlement') {
-            $statusPembayaran = 'success'; 
-        } elseif ($transactionStatus == 'deny' || $transactionStatus == 'cancel') {
-            $statusPembayaran = 'failed';
-        } elseif ($transactionStatus == 'expire') {
-            $statusPembayaran = 'expired';
-        }
-
-        // 2. Cari data transaksi di database lokal berdasarkan kode_transaksi
-        $transaction = Transaction::where('kode_transaksi', $orderId)->first();
-
-        if ($transaction) {
-            // 3. Logika pengurangan kapasitas tiket dijalankan HANYA JIKA status berubah menjadi success
-            if ($statusPembayaran === 'success' && $transaction->status_pembayaran !== 'success') {
+            if ($request->status === 'success') {
                 $event = Event::find($transaction->event_id);
                 if ($event) {
                     if ($transaction->jenis_tiket === 'vip') {
@@ -161,16 +123,46 @@ class TransactionController extends Controller
                 }
             }
 
-            // 4. Perbarui status pembayaran transaksi di database lokal
             $transaction->update([
-                'status_pembayaran' => $statusPembayaran
+                'status_pembayaran' => $request->status
             ]);
 
-            return response()->json(['message' => 'Status database berhasil diperbarui.'], 200);
-        }
+            DB::commit();
+            return response()->json(['success' => true, 'message' => 'Status transaksi berhasil diubah menjadi ' . strtoupper($request->status)], 200);
 
-        return response()->json(['message' => 'Data transaksi tidak ditemukan.'], 404);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => 'Gagal memperbarui status.', 'error' => $e->getMessage()], 500);
+        }
     }
+
+    private function kirimNotifTelegram($transaction, $event, $user)
+    {
+        $token = env('TELEGRAM_BOT_TOKEN');
+        $chatId = env('TELEGRAM_ADMIN_CHAT_ID');
+
+        if (!$token || !$chatId) return;
+
+        // Susun teks rapi berformat Markdown untuk layar HP Admin
+        $pesan = "*ADA PEMBAYARAN BARU (EventIn)* 🚨\n\n"
+               . "• *Kode Transaksi:* `{$transaction->kode_transaksi}`\n"
+               . "• *Nama Pembeli:* {$user->nama}\n"
+               . "• *Nama Event:* {$event->nama_event}\n"
+               . "• *Kategori Tiket:* " . strtoupper($transaction->jenis_tiket) . "\n"
+               . "• *Total Tagihan:* Rp " . number_format($transaction->total_harga, 0, ',', '.') . "\n\n"
+               . "*DATA REKENING PENGIRIM:*\n"
+               . "• *Bank Asal:* {$transaction->bank_pengirim}\n"
+               . "• *Atas Nama:* {$transaction->atas_nama}\n\n"
+               . "*Status saat ini:* `Checking Admin`\n"
+               . "Silakan buka Dashboard Admin EventIn untuk memeriksa keaslian bukti gambar dan mengubah status konfirmasi.";
+
+        Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
+            'chat_id'    => $chatId,
+            'text'       => $pesan,
+            'parse_mode' => 'Markdown'
+        ]);
+    }
+    
 
     public function getMyTickets(Request $request)
     {
@@ -180,11 +172,9 @@ class TransactionController extends Controller
             return response()->json(['success' => false, 'message' => 'Sesi tidak valid.'], 401);
         }
 
-        // 2. Ambil transaksi milik user tersebut yang statusnya SUDAH BERHASIL (Lunas)
-        // Kita sertakan data 'event' menggunakan eager loading (with)
         $tickets = \App\Models\Transaction::with('event')
             ->where('user_id', $authUser->id)
-            ->where('status_pembayaran', 'pending')
+            ->whereIn('status_pembayaran', ['success', 'checking_admin'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -214,5 +204,43 @@ class TransactionController extends Controller
             'data' => $ticket
         ], 200);
     }
+
+    public function downloadTiketPDF($kode_transaksi) 
+    {
+        try {
+            $transaction = \App\Models\Transaction::where('kode_transaksi', $kode_transaksi)->first();
+
+            if (!$transaction) {
+                return response()->json(['success' => false, 'message' => 'Tiket tidak ditemukan.'], 404);
+            }
+
+            $user = \App\Models\User::find($transaction->user_id);
+            $event = \App\Models\Event::find($transaction->event_id);
+
+            $qrCodeData = QrCode::format('svg')
+                                    ->size(150)
+                                    ->margin(1)
+                                    ->generate($transaction->kode_transaksi);
+
+            $qrCodebase64 = 'data:image/png;base64,' . base64_encode($qrCodeData);
+
+            $data = [
+                'transaction' => $transaction,
+                'user' => $user,
+                'event' => $event,
+                'qr_code' => $qrCodebase64,
+                'tanggal_cetak' => date('d M Y - H:i')
+            ];
+
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.download_tiket_pdf', $data);
+            $pdf->setPaper('a4', 'potrait');
+
+            return $pdf->download('Tiket-' . $transaction->kode_transaksi . '.pdf');
+        } catch (\Exception $e) {
+            \Log::error('Error Cetak PDF: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
 }
+            
 

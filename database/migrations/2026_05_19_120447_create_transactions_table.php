@@ -20,9 +20,11 @@ return new class extends Migration
             $table->string('nomor_kursi')->nullable();
             $table->integer('jumlah_tiket')->default(1);
             $table->integer('total_harga');    
-            $table->enum('status_pembayaran', ['pending', 'success', 'failed', 'expired'])->default('pending');
-            $table->enum('status_kehadiran', ['belum_hadir', 'checked_in'])->default('belum_hadir');
-            $table->text('payment_url')->nullable();
+            $table->string('bank_pengirim')->nullable();
+            $table->string('atas_nama')->nullable();
+            $table->string('bukti_pembayaran')->nullable();
+            $table->enum('status_pembayaran', ['checking_admin', 'success', 'failed'])->default('checking_admin');
+            $table->enum('status_kehadiran', ['belum_hadir', 'checked_in'])->default('belum_hadir');            
             $table->timestamps();
         });
     }

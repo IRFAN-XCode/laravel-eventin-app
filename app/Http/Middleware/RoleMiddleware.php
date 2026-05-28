@@ -28,14 +28,12 @@ class RoleMiddleware
             ], 401);
         }
 
-        // Memotong teks 'Bearer ' (7 karakter) untuk mengambil string token murninya
         $token = substr($header, 7);
 
         try {
-            // 2. Decode token menggunakan Secret Key dari .env
+            // 2. Decode token
             $decoded = JWT::decode($token, new Key(env('JWT_SECRET_KEY'), 'HS256'));
             
-            // 3. Validasi Hak Akses (Role)
             if (!in_array($decoded->role, $roles)) {
                 return response()->json([
                     'success' => false,
@@ -43,7 +41,6 @@ class RoleMiddleware
                 ], 403);
             }
 
-            // Menyisipkan data user yang ter-decode ke dalam request agar bisa dipakai di Controller lain
             $request->attributes->add(['auth_user' => $decoded]);
 
             return $next($request);

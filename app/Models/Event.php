@@ -33,4 +33,9 @@ class Event extends Model
         // 'App\Models\User' disesuaikan dengan model EO/User kamu
         return $this->belongsTo(Organizer::class, 'organizer_id'); 
     }
+
+    public function transactions()
+    {
+        return $this->hasMany(Transaction::class, 'event_id', 'id');
+    }
 }

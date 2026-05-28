@@ -17,13 +17,20 @@ class Transaction extends Model
         'nomor_kursi',
         'jumlah_tiket',
         'total_harga',
+        'bank_pengirim',
+        'atas_nama',
+        'bukti_pembayaran',
         'status_pembayaran',
         'status_kehadiran',
-        'payment_url'
     ];
 
     public function event()
     {
         return $this->belongsTo(Event::class, 'event_id', 'id');
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'user_id', 'id');
     }
 }

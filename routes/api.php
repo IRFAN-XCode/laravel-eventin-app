@@ -5,7 +5,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\TransactionController;
-use App\Http\Controllers\Api\PaymentGatewayController;
 use App\Http\Controllers\EventController;
 use App\Http\Middleware\RoleMiddleware;
 
@@ -16,13 +15,14 @@ Route::get('/user', function (Request $request) {
 Route::get('/events', [EventController::class, 'index']);
 Route::get('/event-detail/{id}', [EventController::class, 'show']);
 
-
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register-organizer', [AuthController::class, 'registerOrganizer']);
 Route::post('/login-organizer', [AuthController::class, 'loginOrganizer']);
 
-Route::post('/midtrans-notification', [TransactionController::class, 'notificationHandler']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 Route::middleware([RoleMiddleware::class. ':user'])->group(function () {
 
@@ -40,15 +40,15 @@ Route::middleware([RoleMiddleware::class. ':user'])->group(function () {
 
     Route::get('/detail-ticket/{kode_transaksi}', [TransactionController::class, 'showDetailTicket']);
 
-    Route::post('/checkout-event', [PaymentGatewayController::class, 'requestInvoice']);
+    Route::post('/checkout-event', [TransactionController::class, 'checkout']);
 
 });
 
 Route::middleware([RoleMiddleware::class. ':organizer'])->group(function () {
     
     Route::post('/events', [EventController::class, 'store']);
+    Route::put('/transactions/{id}/konfirmasi', [TransactionController::class, 'konfirmasiStatusAdmin']);
 
 });
 
-Route::middleware(['RoleMiddleware'])->group(function () {
-});
+Route::get('/transactions/{kode_transaksii}/download_pdf', [TransactionController::class, 'downloadTiketPDF']);

@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Firebase\JWT\JWT;
-
+use App\Mail\SendOtpMail;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {
@@ -284,7 +285,7 @@ class AuthController extends Controller
                 'user_id' => $user->id,
                 'nama_eo' => $request->nama_eo,
                 'file_proposal' => $filePath,
-                'status' => 'accept',
+                'status' => 'pending',
             ]);
 
             DB::commit();
@@ -393,7 +394,7 @@ class AuthController extends Controller
         ], 200);
     }
 
-        public function refreshToken(Request $request)
+    public function refreshToken(Request $request)
     {
         $authUser = $request->attributes->get('auth_user');
 
@@ -421,7 +422,7 @@ class AuthController extends Controller
             'email' => $user->email,
             'role' => $user->role,
             'iat' => now()->timestamp,
-            'exp' => now()->addMinutes(30)->timestamp // Reset otomatis masa berlaku baru
+            'exp' => now()->addMinutes(30)->timestamp
         ];
 
         $newToken = JWT::encode($payload, env('JWT_SECRET_KEY'), 'HS256');
@@ -431,5 +432,116 @@ class AuthController extends Controller
             'message' => 'Token berhasil diperbarui otomatis.',
             'token' => 'Bearer ' . $newToken
         ], 200);
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string|email|exists:users,email',
+        ], [
+            'email.exists' => 'Email tidak terdaftar di sistem kami.'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        $otp = rand(100000, 999999);
+
+        DB::table('password_otps')->updateOrInsert(
+            ['email' => $request->email],
+            [
+                'otp' => $otp,
+                'expires_at' => now()->addMinutes(10),
+                'created_at' => now(),
+                'updated_at' => now()
+            ]
+        );
+
+        try {
+            Mail::to($request->email)->send(new SendOtpMail($otp));
+            return response()->json([
+                'success' => true,
+                'message' => 'Kode OTP telah dikirim ke email Anda.'
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengirim email, coba lagi nanti.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function verifyOtp(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'otp' => 'required|numeric',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        // Cek kecocokan OTP di database
+        $otpData = DB::table('password_otps')
+            ->where('email', $request->email)
+            ->where('otp', $request->otp)
+            ->first();
+
+        if (!$otpData) {
+            return response()->json(['success' => false, 'message' => 'Kode OTP salah.'], 400);
+        }
+
+        if (now()->greaterThan($otpData->expires_at)) {
+            return response()->json(['success' => false, 'message' => 'Kode OTP sudah kadaluwarsa.'], 400);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OTP valid, silakan atur ulang password Anda.'
+        ], 200);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'otp' => 'required|numeric',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        // Validasi ulang untuk memastikan integritas data OTP saat eksekusi ganti password
+        $otpData = DB::table('password_otps')
+            ->where('email', $request->email)
+            ->where('otp', $request->otp)
+            ->first();
+
+        if (!$otpData || now()->greaterThan($otpData->expires_at)) {
+            return response()->json(['success' => false, 'message' => 'Sesi reset password habis atau tidak valid.'], 400);
+        }
+
+        // Proses update password baru user
+        $user = User::where('email', $request->email)->first();
+        if ($user) {
+            $user->update([
+                'password' => Hash::make($request->password)
+            ]);
+
+            // Hapus data OTP dari tabel setelah password sukses diperbarui
+            DB::table('password_otps')->where('email', $request->email)->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password Anda berhasil diperbarui! Silakan login.'
+            ], 200);
+        }
+
+        return response()->json(['success' => false, 'message' => 'User tidak ditemukan.'], 404);
     }
 }
