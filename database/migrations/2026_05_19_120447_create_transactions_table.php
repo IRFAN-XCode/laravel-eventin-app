@@ -19,7 +19,7 @@ return new class extends Migration
             $table->enum('jenis_tiket', ['vip', 'reguler']);
             $table->string('nomor_kursi')->nullable();
             $table->integer('jumlah_tiket')->default(1);
-            $table->integer('total_harga');    
+            $table->integer('total_harga');
             $table->string('bank_pengirim')->nullable();
             $table->string('atas_nama')->nullable();
             $table->string('bukti_pembayaran')->nullable();

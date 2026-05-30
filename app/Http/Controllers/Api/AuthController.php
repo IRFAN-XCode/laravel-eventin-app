@@ -452,7 +452,7 @@ class AuthController extends Controller
             ['email' => $request->email],
             [
                 'otp' => $otp,
-                'expires_at' => now()->addMinutes(10),
+                'expired_at' => now()->addMinutes(5),
                 'created_at' => now(),
                 'updated_at' => now()
             ]
@@ -494,7 +494,7 @@ class AuthController extends Controller
             return response()->json(['success' => false, 'message' => 'Kode OTP salah.'], 400);
         }
 
-        if (now()->greaterThan($otpData->expires_at)) {
+        if (now()->greaterThan($otpData->expired_at)) {
             return response()->json(['success' => false, 'message' => 'Kode OTP sudah kadaluwarsa.'], 400);
         }
 
@@ -522,7 +522,7 @@ class AuthController extends Controller
             ->where('otp', $request->otp)
             ->first();
 
-        if (!$otpData || now()->greaterThan($otpData->expires_at)) {
+        if (!$otpData || now()->greaterThan($otpData->expired_at)) {
             return response()->json(['success' => false, 'message' => 'Sesi reset password habis atau tidak valid.'], 400);
         }
 

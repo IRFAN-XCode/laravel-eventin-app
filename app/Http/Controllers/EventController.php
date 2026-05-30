@@ -73,56 +73,5 @@ class EventController extends Controller
             'success' => true,
             'data' => $event
         ], 200);
-            // $event = Event::with('organizer:id,user_id,nama_eo,status')->find($id);
-
-        // if (!$event) {
-        //     return response()->json([
-        //         'success' => false,
-        //         'message' => 'Event tidak ditemukan.'
-        //     ], 404);
-        // }
-
-        // if ($event->status !== 'open') {
-        //     return response()->json([
-        //         'success' => false,
-        //         'message' => 'Event telah ditutup.'
-        //     ], 404);
-        // }
-
-        // $kursiTerpesan = \App\Models\Transaction::where('event_id', $id)
-        //     ->whereIn('status_pembayaran', ['success', 'checking_admin'])
-        //     ->where('nomor_kursi', '!=', '')
-        //     ->whereNotNull('nomor_kursi')
-        //     ->pluck('nomor_kursi')
-        //     ->map(function($item) {
-        //         return trim($item);
-        //     })
-        //     ->toArray();
-
-        //     \Log::info('Kursi terjual untuk Event ID ' . $id . ': ' . json_encode($kursiTerpesan));
-
-        // response()->json([
-        //     'success' => true, 
-        //     'data' => [ 
-        //         'id' => $event->id,
-        //         'nama_event' => $event->nama_event,
-        //         'seats' => $event->seats,
-        //         'kapasistas_reg' => $event->kapasitas_reg,
-        //         'kapasistas_vip' => $event->kapasitas_vip,
-        //         'harga_reg' => $event->harga_reg,
-        //         'harga_vip'=> $event->harga_vip,
-        //         'kursi_terpesan' => $kursiTerpesan]], 200);
-
-        // if ($event->thumbnail) {
-        //     $event->poster_url = asset('storage/' . $event->thumbnail);
-        // } else {
-        //     $event->poster_url = 'https://via.placeholder.com/600x400';
-        // }
-
-        // return response()->json([
-        //     'success' => true,
-        //     'message' => 'Detail event berhasil diambil.',
-        //     'data'    => $event
-        // ], 200);
     }
 }
